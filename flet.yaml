@@ -1,7 +1,13 @@
 app:
   name: "Andrómeda"
-  package: "com.tuusuario.andromeda"
+  package: "com.andromeda.docs"
   version: "1.0.0"
 
 android:
+  # Usamos icon simple para evitar errores de compilación
   icon: "icon.png"
+  permissions:
+    - INTERNET
+    - WRITE_EXTERNAL_STORAGE
+    - READ_EXTERNAL_STORAGE
+  uses_cleartext_traffic: true
