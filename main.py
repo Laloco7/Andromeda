@@ -24,163 +24,110 @@ class AndromedaApp:
         self.ruta_actual = []
         self.syncing = False
 
-    def safe_str(self, val): return str(val).strip() if val else ""
+    def extraer_id_drive(self, link):
+        match = re.search(r'/d/([a-zA-Z0-9_-]+)', str(link))
+        return match.group(1) if match else str(link)
 
-    def extraer_id_drive(self, link_raw):
-        link = self.safe_str(link_raw)
-        match = re.search(r'/d/([a-zA-Z0-9_-]+)', link)
-        return match.group(1) if match else link
-
-    def inferir_metadatos(self, nombre_archivo):
-        nombre = self.safe_str(nombre_archivo).upper()
+    def inferir_metadatos(self, nombre):
+        nombre = str(nombre).upper()
         area = "General"
         match_area = re.search(r'-(\d{4})[-_]', nombre)
         if match_area: area = f"Área {match_area.group(1)}"
-        elif "1002" in nombre: area = "Área 1002"
-        
         tipo = "Doc"
         if any(x in nombre for x in ["DW", "PLANO"]): tipo = "Plano"
         elif any(x in nombre for x in ["TS", "ET"]): tipo = "Espec. Téc."
-        elif any(x in nombre for x in ["MC", "MEMORIA"]): tipo = "Memoria"
         return area, tipo
-
-    def get_local_path(self, nombre_archivo):
-        nombre_clean = re.sub(r'[\\/*?:"<>|]', "", nombre_archivo)
-        if not nombre_clean.lower().endswith(".pdf"): nombre_clean += ".pdf"
-        return os.path.join(STORAGE_FOLDER, nombre_clean)
 
     def procesar_csv(self, csv_text):
         f = StringIO(csv_text)
         reader = csv.DictReader(f, fieldnames=["col_archivo", "col_link", "col_nombre_real"])
         processed = []
         for row in reader:
-            nombre = self.safe_str(row.get("col_archivo"))
-            link = self.safe_str(row.get("col_link"))
+            nombre = str(row.get("col_archivo", "")).strip()
             if not nombre or "nombre" in nombre.lower(): continue
-            drive_id = self.extraer_id_drive(link)
-            if not drive_id: continue
+            drive_id = self.extraer_id_drive(row.get("col_link", ""))
             area, tipo = self.inferir_metadatos(nombre)
-            titulo = self.safe_str(row.get("col_nombre_real"))
-            if not titulo or titulo == "#N/A": titulo = nombre
-            processed.append({
-                "id": drive_id,
-                "titulo": titulo,
-                "nombre_archivo": nombre,
-                "area": area,
-                "tipo": tipo,
-                "path": self.get_local_path(nombre)
-            })
+            path = os.path.join(STORAGE_FOLDER, f"{nombre}.pdf")
+            processed.append({"id": drive_id, "titulo": row.get("col_nombre_real", nombre), "path": path, "area": area, "tipo": tipo})
         return processed
 
     def construir_jerarquia(self):
-        nueva_jerarquia = {}
-        for doc in self.data:
-            area = doc["area"]
-            tipo = doc["tipo"]
-            if area not in nueva_jerarquia: nueva_jerarquia[area] = {"_count": 0, "_sub": {}}
-            if tipo not in nueva_jerarquia[area]["_sub"]: nueva_jerarquia[area]["_sub"][tipo] = {"_count": 0, "_docs": []}
-            nueva_jerarquia[area]["_sub"][tipo]["_docs"].append(doc)
-            nueva_jerarquia[area]["_sub"][tipo]["_count"] += 1
-            nueva_jerarquia[area]["_count"] += 1
-        self.jerarquia = nueva_jerarquia
+        self.jerarquia = {}
+        for d in self.data:
+            a, t = d["area"], d["tipo"]
+            if a not in self.jerarquia: self.jerarquia[a] = {"_sub": {}}
+            if t not in self.jerarquia[a]["_sub"]: self.jerarquia[a]["_sub"][t] = {"_docs": []}
+            self.jerarquia[a]["_sub"][t]["_docs"].append(d)
 
 def main(page: ft.Page):
     app = AndromedaApp()
     page.title = "Andrómeda"
     page.theme_mode = ft.ThemeMode.DARK
-    page.bgcolor = "#111111"
-    page.padding = 10
-
-    lbl_status = ft.Text("Listo", size=11, color="grey")
-    pb = ft.ProgressBar(width=400, color="orange", visible=False)
     lista_ui = ft.Column(scroll="auto", expand=True)
+    pb = ft.ProgressBar(visible=False, color="orange")
+    lbl = ft.Text("Listo", size=12)
 
-    def renderizar():
+    def render():
         lista_ui.controls.clear()
-        if app.ruta_actual:
-            lista_ui.controls.append(ft.TextButton("< Volver", on_click=volver_atras, icon=ft.icons.CHEVRON_LEFT))
-            lista_ui.controls.append(ft.Text(" / ".join(app.ruta_actual), size=12, color="orange"))
-
         nivel = len(app.ruta_actual)
+        if nivel > 0:
+            lista_ui.controls.append(ft.TextButton("< Volver", on_click=lambda _: (app.ruta_actual.pop(), render()), icon=ft.icons.CHEVRON_LEFT))
+        
         if not app.data:
-            lista_ui.controls.append(ft.Container(content=ft.Text("Presiona SYNC para cargar datos", color="grey"), padding=30))
+            lista_ui.controls.append(ft.Container(content=ft.Text("Sin datos. Pulsa SYNC."), padding=20))
         elif nivel == 0:
-            for area in sorted(app.jerarquia.keys()):
-                lista_ui.controls.append(ft.ListTile(
-                    leading=ft.Icon(ft.icons.FOLDER_OPEN_ROUNDED, color="amber"),
-                    title=ft.Text(area),
-                    on_click=lambda e, a=area: navegar(a)
-                ))
+            for a in sorted(app.jerarquia.keys()):
+                lista_ui.controls.append(ft.ListTile(title=ft.Text(a), leading=ft.Icon(ft.icons.FOLDER_ROUNDED, color="amber"), on_click=lambda e, a=a: (app.ruta_actual.append(a), render())))
         elif nivel == 1:
-            area = app.ruta_actual[0]
-            for tipo in sorted(app.jerarquia[area]["_sub"].keys()):
-                lista_ui.controls.append(ft.ListTile(
-                    leading=ft.Icon(ft.icons.FOLDER_ROUNDED, color="blue"),
-                    title=ft.Text(tipo),
-                    on_click=lambda e, t=tipo: navegar(t)
-                ))
+            a = app.ruta_actual[0]
+            for t in sorted(app.jerarquia[a]["_sub"].keys()):
+                lista_ui.controls.append(ft.ListTile(title=ft.Text(t), leading=ft.Icon(ft.icons.FOLDER_OPEN_ROUNDED, color="blue"), on_click=lambda e, t=t: (app.ruta_actual.append(t), render())))
         elif nivel == 2:
-            area, tipo = app.ruta_actual[0], app.ruta_actual[1]
-            for d in app.jerarquia[area]["_sub"][tipo]["_docs"]:
-                desc = os.path.exists(d["path"])
-                lista_ui.controls.append(ft.Container(
-                    content=ft.Row([
-                        ft.Icon(ft.icons.INSERT_DRIVE_FILE, color="green" if desc else "grey"),
-                        ft.Text(d["titulo"], size=13, expand=True),
-                        ft.IconButton(ft.icons.FILE_OPEN, on_click=lambda e, doc=d: abrir_doc(doc))
-                    ]),
-                    padding=5, bgcolor="#1A1A1A", border_radius=5
+            a, t = app.ruta_actual[0], app.ruta_actual[1]
+            for d in app.jerarquia[a]["_sub"][t]["_docs"]:
+                existe = os.path.exists(d["path"])
+                lista_ui.controls.append(ft.ListTile(
+                    title=ft.Text(d["titulo"]), 
+                    leading=ft.Icon(ft.icons.PICTURE_AS_PDF, color="green" if existe else "grey"), 
+                    on_click=lambda e, d=d: page.launch_url(f"file://{os.path.abspath(d['path'])}")
                 ))
         page.update()
 
-    def navegar(dest): app.ruta_actual.append(dest); renderizar()
-    def volver_atras(e): app.ruta_actual.pop(); renderizar()
-    
-    def abrir_doc(doc):
-        if os.path.exists(doc["path"]): page.launch_url(f"file://{os.path.abspath(doc['path'])}")
-        else: page.snack_bar = ft.SnackBar(ft.Text("Aún no descargado")); page.snack_bar.open = True; page.update()
-
-    def iniciar_sync(e):
-        if app.syncing: return
-        threading.Thread(target=ejecutar_sync, daemon=True).start()
-
-    def ejecutar_sync():
+    def sync_task():
         app.syncing = True
         pb.visible = True
-        page.update()
         try:
             ctx = ssl._create_unverified_context()
             with urllib.request.urlopen(URL_CSV, context=ctx) as r:
                 app.data = app.procesar_csv(r.read().decode('utf-8'))
                 app.construir_jerarquia()
                 with open(CACHE_FILE, 'w') as f: json.dump(app.data, f)
-            renderizar()
+            render()
             for i, d in enumerate(app.data):
                 if not os.path.exists(d["path"]):
-                    lbl_status.value = f"Descargando {i+1}/{len(app.data)}..."
-                    pb.value = (i+1)/len(app.data)
+                    lbl.value = f"Bajando {i+1}/{len(app.data)}..."
                     page.update()
+                    url = f"https://drive.google.com/uc?export=download&id={d['id']}"
                     try:
-                        url = f"https://drive.google.com/uc?export=download&id={d['id']}"
-                        with urllib.request.urlopen(url, context=ctx) as res, open(d["path"], 'wb') as out:
-                            out.write(res.read())
+                        with urllib.request.urlopen(url, context=ctx) as res, open(d["path"], 'wb') as out: out.write(res.read())
                     except: pass
-            lbl_status.value = "Sincronizado ✅"
-        except: lbl_status.value = "Error de conexión"
-        app.syncing = False
+            lbl.value = "Sincronizado ✅"
+        except Exception as e: lbl.value = f"Error: {e}"
         pb.visible = False
-        renderizar()
+        app.syncing = False
+        render()
 
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, 'r') as f:
-                app.data = json.load(f)
-                app.construir_jerarquia()
+            with open(CACHE_FILE, 'r') as f: app.data = json.load(f); app.construir_jerarquia()
         except: pass
 
-    page.add(ft.Text("ANDRÓMEDA", size=22, weight="bold"), 
-             ft.ElevatedButton("SYNC TOTAL", on_click=iniciar_sync, icon=ft.icons.SYNC),
-             pb, lbl_status, ft.Divider(), lista_ui)
-    renderizar()
+    page.add(
+        ft.Text("ANDRÓMEDA", size=22, weight="bold"), 
+        ft.ElevatedButton("SYNC TOTAL", on_click=lambda _: threading.Thread(target=sync_task, daemon=True).start(), icon=ft.icons.SYNC), 
+        pb, lbl, ft.Divider(), 
+        lista_ui
+    )
+    render()
 
 ft.app(target=main)
