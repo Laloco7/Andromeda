@@ -1,0 +1,36 @@
+name: Build Andromeda APK
+
+on:
+  workflow_dispatch: # Esto permite activar el botón manualmente
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+
+      - name: Install Dependencies
+        run: |
+          pip install flet
+          pip install -r requirements.txt
+
+      - name: Build APK
+        run: |
+          flet build apk --verbose
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Andromeda_App
+          path: build/apk/app-release.apk
