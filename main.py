@@ -6,7 +6,6 @@ import re
 import json
 import ssl
 import urllib.request
-import platform
 from io import StringIO
 
 # --- CONFIGURACIÓN ---
@@ -14,7 +13,6 @@ URL_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX2MAGIFlkpTm_SE2kVw
 CACHE_FILE = "andromeda_db.json"
 STORAGE_FOLDER = "Andromeda_Files"
 
-# Asegurar carpeta de archivos
 if not os.path.exists(STORAGE_FOLDER):
     try: os.makedirs(STORAGE_FOLDER)
     except: pass
@@ -49,7 +47,6 @@ class AndromedaApp:
     def get_local_path(self, nombre_archivo):
         nombre_clean = re.sub(r'[\\/*?:"<>|]', "", nombre_archivo)
         if not nombre_clean.lower().endswith(".pdf"): nombre_clean += ".pdf"
-        # Usamos rutas relativas para máxima compatibilidad en Android
         return os.path.join(STORAGE_FOLDER, nombre_clean)
 
     def procesar_csv(self, csv_text):
@@ -62,11 +59,9 @@ class AndromedaApp:
             if not nombre or "nombre" in nombre.lower(): continue
             drive_id = self.extraer_id_drive(link)
             if not drive_id: continue
-            
             area, tipo = self.inferir_metadatos(nombre)
             titulo = self.safe_str(row.get("col_nombre_real"))
             if not titulo or titulo == "#N/A": titulo = nombre
-
             processed.append({
                 "id": drive_id,
                 "titulo": titulo,
@@ -94,83 +89,56 @@ def main(page: ft.Page):
     page.title = "Andrómeda"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#111111"
-    page.padding = 15
+    page.padding = 10
 
-    # --- UI ELEMENTS ---
-    lbl_status = ft.Text("Listo", size=12, color="grey")
-    pb = ft.ProgressBar(width=400, color="blue", visible=False)
+    lbl_status = ft.Text("Listo", size=11, color="grey")
+    pb = ft.ProgressBar(width=400, color="orange", visible=False)
     lista_ui = ft.Column(scroll="auto", expand=True)
 
-    def actualizar_ui():
+    def renderizar():
         lista_ui.controls.clear()
-        
-        # Botón Volver
         if app.ruta_actual:
-            lista_ui.controls.append(
-                ft.TextButton("< Volver", on_click=volver_atras, icon=ft.icons.ARROW_BACK)
-            )
-            lista_ui.controls.append(ft.Text(" / ".join(app.ruta_actual), size=14, color="blue", weight="bold"))
+            lista_ui.controls.append(ft.TextButton("< Volver", on_click=volver_atras, icon=ft.icons.CHEVRON_LEFT))
+            lista_ui.controls.append(ft.Text(" / ".join(app.ruta_actual), size=12, color="orange"))
 
         nivel = len(app.ruta_actual)
-        
         if not app.data:
-            lista_ui.controls.append(ft.Container(
-                content=ft.Text("No hay datos locales. Presiona SYNC.", color="orange", text_align="center"),
-                padding=20
-            ))
-        elif nivel == 0: # Áreas
+            lista_ui.controls.append(ft.Container(content=ft.Text("Presiona SYNC para cargar datos", color="grey"), padding=30))
+        elif nivel == 0:
             for area in sorted(app.jerarquia.keys()):
                 lista_ui.controls.append(ft.ListTile(
-                    leading=ft.Icon(ft.icons.FOLDER, color="amber"),
+                    leading=ft.Icon(ft.icons.FOLDER_OPEN_ROUNDED, color="amber"),
                     title=ft.Text(area),
-                    subtitle=ft.Text(f"{app.jerarquia[area]['_count']} documentos"),
                     on_click=lambda e, a=area: navegar(a)
                 ))
-        elif nivel == 1: # Tipos
+        elif nivel == 1:
             area = app.ruta_actual[0]
-            sub = app.jerarquia[area]["_sub"]
-            for tipo in sorted(sub.keys()):
+            for tipo in sorted(app.jerarquia[area]["_sub"].keys()):
                 lista_ui.controls.append(ft.ListTile(
-                    leading=ft.Icon(ft.icons.FOLDER_OPEN, color="blue"),
+                    leading=ft.Icon(ft.icons.FOLDER_ROUNDED, color="blue"),
                     title=ft.Text(tipo),
-                    subtitle=ft.Text(f"{sub[tipo]['_count']} archivos"),
                     on_click=lambda e, t=tipo: navegar(t)
                 ))
-        elif nivel == 2: # Documentos
+        elif nivel == 2:
             area, tipo = app.ruta_actual[0], app.ruta_actual[1]
-            docs = app.jerarquia[area]["_sub"][tipo]["_docs"]
-            for d in docs:
-                descargado = os.path.exists(d["path"])
+            for d in app.jerarquia[area]["_sub"][tipo]["_docs"]:
+                desc = os.path.exists(d["path"])
                 lista_ui.controls.append(ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.icons.DESCRIPTION, color="green" if descargado else "grey"),
-                        ft.Column([
-                            ft.Text(d["titulo"], size=14, weight="bold", width=250),
-                            ft.Text("Disponible Offline" if descargado else "Pendiente de descarga", size=11, color="grey")
-                        ], expand=True),
-                        ft.IconButton(ft.icons.OPEN_IN_NEW, on_click=lambda e, doc=d: abrir_doc(doc))
+                        ft.Icon(ft.icons.INSERT_DRIVE_FILE, color="green" if desc else "grey"),
+                        ft.Text(d["titulo"], size=13, expand=True),
+                        ft.IconButton(ft.icons.FILE_OPEN, on_click=lambda e, doc=d: abrir_doc(doc))
                     ]),
-                    padding=10, bgcolor="#222222", border_radius=8
+                    padding=5, bgcolor="#1A1A1A", border_radius=5
                 ))
         page.update()
 
-    def navegar(destino):
-        app.ruta_actual.append(destino)
-        actualizar_ui()
-
-    def volver_atras(e):
-        if app.ruta_actual: app.ruta_actual.pop()
-        actualizar_ui()
-
+    def navegar(dest): app.ruta_actual.append(dest); renderizar()
+    def volver_atras(e): app.ruta_actual.pop(); renderizar()
+    
     def abrir_doc(doc):
-        if os.path.exists(doc["path"]):
-            # En Android usamos el path absoluto para abrir
-            abs_path = os.path.abspath(doc["path"])
-            page.launch_url(f"file://{abs_path}")
-        else:
-            page.snack_bar = ft.SnackBar(ft.Text("Archivo no descargado. Pulsa SYNC."))
-            page.snack_bar.open = True
-            page.update()
+        if os.path.exists(doc["path"]): page.launch_url(f"file://{os.path.abspath(doc['path'])}")
+        else: page.snack_bar = ft.SnackBar(ft.Text("Aún no descargado")); page.snack_bar.open = True; page.update()
 
     def iniciar_sync(e):
         if app.syncing: return
@@ -178,68 +146,41 @@ def main(page: ft.Page):
 
     def ejecutar_sync():
         app.syncing = True
-        btn_sync.disabled = True
         pb.visible = True
-        pb.value = None
-        lbl_status.value = "Conectando con Drive..."
         page.update()
-
         try:
-            # 1. Bajar lista
-            context = ssl._create_unverified_context()
-            with urllib.request.urlopen(URL_CSV, context=context) as response:
-                csv_data = response.read().decode('utf-8')
-                app.data = app.procesar_csv(csv_data)
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(URL_CSV, context=ctx) as r:
+                app.data = app.procesar_csv(r.read().decode('utf-8'))
                 app.construir_jerarquia()
-                # Guardar caché
                 with open(CACHE_FILE, 'w') as f: json.dump(app.data, f)
-            
-            actualizar_ui()
-
-            # 2. Descargar archivos faltantes
-            total = len(app.data)
-            for i, doc in enumerate(app.data):
-                if not os.path.exists(doc["path"]):
-                    lbl_status.value = f"Bajando {i+1}/{total}: {doc['nombre_archivo'][:20]}..."
-                    pb.value = (i+1)/total
+            renderizar()
+            for i, d in enumerate(app.data):
+                if not os.path.exists(d["path"]):
+                    lbl_status.value = f"Descargando {i+1}/{len(app.data)}..."
+                    pb.value = (i+1)/len(app.data)
                     page.update()
                     try:
-                        url = f"https://drive.google.com/uc?export=download&id={doc['id']}"
-                        with urllib.request.urlopen(url, context=context) as resp, open(doc["path"], 'wb') as out:
-                            out.write(resp.read())
+                        url = f"https://drive.google.com/uc?export=download&id={d['id']}"
+                        with urllib.request.urlopen(url, context=ctx) as res, open(d["path"], 'wb') as out:
+                            out.write(res.read())
                     except: pass
-            
-            lbl_status.value = "Sincronización Completa ✅"
-        except Exception as ex:
-            lbl_status.value = f"Error: {str(ex)}"
-        
+            lbl_status.value = "Sincronizado ✅"
+        except: lbl_status.value = "Error de conexión"
         app.syncing = False
-        btn_sync.disabled = False
         pb.visible = False
-        actualizar_ui()
+        renderizar()
 
-    # --- CARGA INICIAL ---
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, 'r') as f:
                 app.data = json.load(f)
                 app.construir_jerarquia()
-                lbl_status.value = "Datos cargados desde memoria"
         except: pass
 
-    btn_sync = ft.ElevatedButton("SYNC TOTAL 🔄", on_click=iniciar_sync, bgcolor="blue", color="white")
-    
-    page.add(
-        ft.Column([
-            ft.Text("ANDRÓMEDA", size=24, weight="bold"),
-            btn_sync,
-            pb,
-            lbl_status,
-            ft.Divider(),
-            lista_ui
-        ], expand=True)
-    )
-    actualizar_ui()
+    page.add(ft.Text("ANDRÓMEDA", size=22, weight="bold"), 
+             ft.ElevatedButton("SYNC TOTAL", on_click=iniciar_sync, icon=ft.icons.SYNC),
+             pb, lbl_status, ft.Divider(), lista_ui)
+    renderizar()
 
-if __name__ == "__main__":
-    ft.app(target=main)
+ft.app(target=main)
