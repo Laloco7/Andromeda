@@ -20,10 +20,9 @@ jobs:
           pip install flet
 
       - name: Build APK
-        # --icon: usa tu imagen personalizada
-        # --product: define el nombre que aparecerá bajo el icono en el celular
+        # Ahora flet leerá automáticamente el archivo flet.yaml para el icono
         run: |
-          yes | flet build apk --icon icon.png --product "Andrómeda" --verbose
+          yes | flet build apk --verbose
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
