@@ -15,24 +15,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Instalamos Flutter versión estable para que flet no tenga que descargarla dentro del build
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          flutter-version: '3.24.0' 
-
       - name: Install Flet
         run: |
           pip install flet
 
       - name: Build APK
-        # Agregamos permisos explícitos de internet para que Android no bloquee la sincronización
+        # El comando 'yes' enviará "y" a cualquier pregunta que haga el compilador
         run: |
-          flet build apk --verbose
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Andromeda_App
-          path: build/apk/app-release.apk
+          yes | flet build apk --verbose
